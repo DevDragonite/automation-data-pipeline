@@ -145,31 +145,7 @@ Independencia total de restricciones geográficas. El workflow corre en tu propi
 **¿Por qué el IF node?**
 Un pipeline de producción real siempre tiene manejo de errores. El IF node demuestra que este sistema está diseñado para fallar con gracia, no para romperse silenciosamente.
 
----
 
-## 📱 Post de LinkedIn
-
-```
-🔄 Automaticé mi portafolio de Data Science con n8n
-
-Mi Market Basket Analysis dejó de ser un ejercicio estático.
-Ahora es un sistema vivo que se actualiza solo cada semana.
-
-El flujo automatizado hace esto sin que yo toque nada:
-📡 Descarga productos frescos de Open Food Facts API
-🔧 Limpia y transforma los datos automáticamente  
-🧮 Ejecuta el algoritmo Apriori con los datos nuevos
-📊 Actualiza las reglas de asociación del dashboard
-📧 Me envía un reporte ejecutivo con los hallazgos
-
-La diferencia entre un proyecto de portafolio y un 
-sistema de producción real es exactamente esta:
-la automatización.
-
-Stack: Python · n8n · Apriori · Open Food Facts API
-Tiempo de setup: 2 horas | Mantenimiento: 0 horas/semana
-
-#DataScience #Automation #n8n #Python #Portfolio
 #MarketBasketAnalysis #DataEngineering
 ```
 
