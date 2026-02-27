@@ -1,0 +1,181 @@
+{
+  "name": "Market Basket — Data Pipeline Viviente",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [1],
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "node-schedule",
+      "name": "⏰ Trigger Semanal (Lunes 8am)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://world.openfoodfacts.org/cgi/search.pl",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "search_terms", "value": "snack" },
+            { "name": "search_simple", "value": "1" },
+            { "name": "action", "value": "process" },
+            { "name": "json", "value": "1" },
+            { "name": "page_size", "value": "200" },
+            { "name": "fields", "value": "product_name,categories,ingredients_text,nutrition_grades,countries" }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "node-http",
+      "name": "🌐 HTTP — Open Food Facts API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── PROCESAMIENTO Y LIMPIEZA DE DATOS ──\n// Este nodo transforma la respuesta cruda de la API\n// en un formato limpio listo para el pipeline Python\n\nconst response = $input.first().json;\nconst products = response.products || [];\n\nconst timestamp = new Date().toISOString();\nconst runDate = new Date().toISOString().split('T')[0];\n\n// Limpiar y filtrar productos\nconst cleanProducts = products\n  .filter(p => p.product_name && p.product_name.trim() !== '')\n  .map(p => ({\n    product_name: (p.product_name || '').trim().toLowerCase().replace(/[^a-z0-9\\s]/g, ''),\n    category: (p.categories || 'unknown').split(',')[0].trim().toLowerCase(),\n    nutrition_grade: (p.nutrition_grades || 'unknown').toUpperCase(),\n    country: (p.countries || 'unknown').split(',')[0].trim(),\n    has_ingredients: p.ingredients_text ? 'yes' : 'no',\n    run_date: runDate,\n    timestamp: timestamp\n  }))\n  .filter(p => p.product_name.length > 2);\n\n// Generar pares de productos para el Market Basket\n// Simular transacciones agrupando productos por categoría\nconst transactions = [];\nconst categories = {};\n\ncleanProducts.forEach(p => {\n  if (!categories[p.category]) categories[p.category] = [];\n  categories[p.category].push(p.product_name);\n});\n\nObject.keys(categories).forEach(cat => {\n  const prods = categories[cat];\n  if (prods.length >= 2) {\n    for (let i = 0; i < Math.min(prods.length - 1, 50); i++) {\n      transactions.push({\n        transaction_id: `T_${runDate}_${i}`,\n        product_a: prods[i],\n        product_b: prods[i + 1],\n        category: cat,\n        run_date: runDate\n      });\n    }\n  }\n});\n\nconst summary = {\n  total_products_fetched: products.length,\n  total_products_clean: cleanProducts.length,\n  total_transactions_generated: transactions.length,\n  unique_categories: Object.keys(categories).length,\n  run_date: runDate,\n  timestamp: timestamp,\n  status: cleanProducts.length > 0 ? 'SUCCESS' : 'NO_DATA'\n};\n\nconsole.log(`✅ Pipeline procesado: ${cleanProducts.length} productos, ${transactions.length} transacciones`);\n\nreturn [{\n  json: {\n    summary,\n    products: cleanProducts,\n    transactions\n  }\n}];"
+      },
+      "id": "node-code",
+      "name": "🔧 Code — Limpieza y Transformación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── GUARDAR CSV LOCALMENTE ──\n// Genera el contenido CSV de productos y transacciones\n// para que el pipeline Python los procese\n\nconst data = $input.first().json;\nconst { products, transactions, summary } = data;\n\n// CSV de productos\nconst productHeaders = 'product_name,category,nutrition_grade,country,has_ingredients,run_date,timestamp';\nconst productRows = products.map(p => \n  `${p.product_name},${p.category},${p.nutrition_grade},${p.country},${p.has_ingredients},${p.run_date},${p.timestamp}`\n);\nconst productCSV = [productHeaders, ...productRows].join('\\n');\n\n// CSV de transacciones\nconst transHeaders = 'transaction_id,product_a,product_b,category,run_date';\nconst transRows = transactions.map(t =>\n  `${t.transaction_id},${t.product_a},${t.product_b},${t.category},${t.run_date}`\n);\nconst transCSV = [transHeaders, ...transRows].join('\\n');\n\n// Log de ejecución\nconst logContent = `\n=== PIPELINE EXECUTION LOG ===\nDate: ${summary.run_date}\nTimestamp: ${summary.timestamp}\nProducts fetched: ${summary.total_products_fetched}\nProducts cleaned: ${summary.total_products_clean}\nTransactions generated: ${summary.total_transactions_generated}\nUnique categories: ${summary.unique_categories}\nStatus: ${summary.status}\n==============================\n`;\n\nreturn [{\n  json: {\n    summary,\n    productCSV,\n    transCSV,\n    logContent\n  }\n}];"
+      },
+      "id": "node-csv",
+      "name": "📄 Code — Generar CSVs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd /ruta/a/tu/proyecto/market-basket-analysis && echo '{{ $json.productCSV }}' > data/fresh_products.csv && echo '{{ $json.transCSV }}' > data/fresh_transactions.csv && python notebooks/02_market_basket.py >> output/pipeline_log.txt 2>&1 && echo 'PYTHON_SUCCESS' || echo 'PYTHON_ERROR'"
+      },
+      "id": "node-exec",
+      "name": "⚡ Execute — Correr Pipeline Python",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "notes": "IMPORTANTE: Cambia /ruta/a/tu/proyecto por la ruta real de tu proyecto en tu computador"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-success",
+              "leftValue": "={{ $json.stdout }}",
+              "rightValue": "PYTHON_ERROR",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if",
+      "name": "🔀 IF — ¿Éxito o Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── REPORTE DE ÉXITO ──\nconst execData = $input.first().json;\nconst summary = $('🔧 Code — Limpieza y Transformación').first().json.summary;\n\nconst runDate = new Date().toLocaleDateString('es-ES', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric'\n});\n\nconst emailSubject = `✅ Market Basket Pipeline — Ejecución exitosa ${summary.run_date}`;\n\nconst emailBody = `\n🎯 MARKET BASKET ANALYSIS — DATA PIPELINE REPORT\n================================================\n\n📅 Fecha de ejecución: ${runDate}\n⏰ Timestamp: ${summary.timestamp}\n\n📊 RESUMEN DE DATOS PROCESADOS:\n• Productos obtenidos de API: ${summary.total_products_fetched}\n• Productos limpios: ${summary.total_products_clean}\n• Transacciones generadas: ${summary.total_transactions_generated}\n• Categorías únicas: ${summary.unique_categories}\n• Estado: ✅ ${summary.status}\n\n🔄 ACCIONES EJECUTADAS:\n1. ✅ Datos frescos descargados de Open Food Facts API\n2. ✅ Limpieza y transformación completada\n3. ✅ CSVs actualizados en /data/\n4. ✅ Pipeline Python ejecutado correctamente\n5. ✅ Dashboard Streamlit actualizado\n\n📈 PRÓXIMA EJECUCIÓN: Lunes próximo a las 8:00 AM\n\n---\nGenerado automáticamente por n8n\nProyecto: Market Basket Analysis — Portfolio Hely Camargo\n`;\n\nreturn [{\n  json: {\n    subject: emailSubject,\n    body: emailBody,\n    status: 'SUCCESS',\n    summary\n  }\n}];"
+      },
+      "id": "node-success",
+      "name": "✅ Reporte Éxito",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── REPORTE DE ERROR ──\nconst execData = $input.first().json;\n\nconst errorBody = `\n❌ MARKET BASKET PIPELINE — ERROR DETECTADO\n==========================================\n\n📅 Fecha: ${new Date().toISOString()}\n\n🚨 ERROR EN LA EJECUCIÓN:\n${execData.stdout || 'Sin detalles del error'}\n${execData.stderr || ''}\n\n🔧 ACCIONES RECOMENDADAS:\n1. Revisar que la ruta del proyecto es correcta\n2. Verificar que el entorno virtual está activo\n3. Confirmar que los CSVs se guardaron correctamente\n4. Revisar output/pipeline_log.txt para más detalles\n\n---\nGenerado automáticamente por n8n\n`;\n\nreturn [{\n  json: {\n    subject: '❌ Market Basket Pipeline — Error detectado',\n    body: errorBody,\n    status: 'ERROR'\n  }\n}];"
+      },
+      "id": "node-error",
+      "name": "❌ Reporte Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── LOG FINAL ──\n// Guarda un registro de cada ejecución\nconst data = $input.first().json;\nconst logEntry = `[${new Date().toISOString()}] Status: ${data.status} — ${data.subject}\\n`;\nconsole.log(logEntry);\nconsole.log(data.body);\nreturn [{ json: { logged: true, entry: logEntry, ...data } }];"
+      },
+      "id": "node-log",
+      "name": "📝 Log Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 300]
+    }
+  ],
+  "connections": {
+    "⏰ Trigger Semanal (Lunes 8am)": {
+      "main": [[{ "node": "🌐 HTTP — Open Food Facts API", "type": "main", "index": 0 }]]
+    },
+    "🌐 HTTP — Open Food Facts API": {
+      "main": [[{ "node": "🔧 Code — Limpieza y Transformación", "type": "main", "index": 0 }]]
+    },
+    "🔧 Code — Limpieza y Transformación": {
+      "main": [[{ "node": "📄 Code — Generar CSVs", "type": "main", "index": 0 }]]
+    },
+    "📄 Code — Generar CSVs": {
+      "main": [[{ "node": "⚡ Execute — Correr Pipeline Python", "type": "main", "index": 0 }]]
+    },
+    "⚡ Execute — Correr Pipeline Python": {
+      "main": [[{ "node": "🔀 IF — ¿Éxito o Error?", "type": "main", "index": 0 }]]
+    },
+    "🔀 IF — ¿Éxito o Error?": {
+      "main": [
+        [{ "node": "✅ Reporte Éxito", "type": "main", "index": 0 }],
+        [{ "node": "❌ Reporte Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "✅ Reporte Éxito": {
+      "main": [[{ "node": "📝 Log Final", "type": "main", "index": 0 }]]
+    },
+    "❌ Reporte Error": {
+      "main": [[{ "node": "📝 Log Final", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["portfolio", "data-pipeline", "market-basket", "automation"]
+}
