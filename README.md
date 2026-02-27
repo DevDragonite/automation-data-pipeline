@@ -147,10 +147,12 @@ Un pipeline de producción real siempre tiene manejo de errores. El IF node demu
 
 
 #MarketBasketAnalysis #DataEngineering
-```
+
+
 ## 📸 Workflow en Acción
 
 ![Workflow n8n](assets/workflow_screenshot.png)
+```
 ---
 
 *Desarrollado por Hely Camargo — Python · n8n · Pandas · mlxtend*
